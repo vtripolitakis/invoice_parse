@@ -8,6 +8,7 @@ and compares it with the LLM-extracted invoice:
 - ``e-invoicing.gr``     Entersoft viewer (embeds the AADE URL).
 - ``einvoice.s1ecos.gr`` SoftOne viewer (embeds the AADE URL).
 - ``*.epsilonnet.gr``    Epsilon Net viewer (serves raw myDATA XML).
+- ``primer.gr``          Primer viewer (JSON API).
 
 Public API
 ----------
@@ -59,10 +60,13 @@ def _clean(value: str | None) -> str | None:
     return value or None
 
 
-def _parse_amount(value: str | None) -> float | None:
-    """Parse a European-formatted amount ("15,99" or "1.234,56")."""
+def _parse_amount(value: str | float | int | None) -> float | None:
+    """Parse an amount given as a number or European-formatted string."""
     if value is None:
         return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
 
     value = value.strip().replace(" ", "").replace("\xa0", "")
 
@@ -403,6 +407,79 @@ def _fetch_epsilon_record(qr_url: str) -> TaxOfficeRecord:
 
 
 # ---------------------------------------------------------------------------
+# Primer (mydata.primer.gr) — JSON API
+# ---------------------------------------------------------------------------
+
+PRIMER_API_URL = "https://mydata-backend.primer.gr/api/public/mydatasearch"
+
+
+def parse_primer_json(payload: dict) -> TaxOfficeRecord:
+    """Parse the Primer ``mydatasearch`` JSON response."""
+    data = payload.get("data") or {}
+    header = data.get("invoiceHeader") or {}
+    summary = data.get("invoiceSummary") or {}
+    issuer = data.get("issuer") or {}
+    counterpart = data.get("counterpart") or {}
+
+    mark = data.get("mark")
+    mark = str(mark) if mark is not None else None
+
+    aa = header.get("aa")
+    aa = str(aa) if aa is not None else None
+
+    invoice_type = header.get("invoiceType")
+    document_type = MYDATA_INVOICE_TYPES.get(invoice_type or "", invoice_type)
+
+    return TaxOfficeRecord(
+        mark=mark,
+        series=_clean(header.get("series")),
+        aa=_clean(aa),
+        document_type=document_type,
+        issue_date=_clean(header.get("issueDate")),
+        total_amount=_parse_amount(summary.get("totalGrossValue")),
+        net_amount=_parse_amount(summary.get("totalNetValue")),
+        vat_amount=_parse_amount(summary.get("totalVatAmount")),
+        issuer_vat=_clean(issuer.get("vatNumber")),
+        customer_vat=_clean(counterpart.get("vatNumber")),
+    )
+
+
+def _fetch_primer_record(qr_url: str) -> TaxOfficeRecord:
+    """Fetch the document record from the Primer myDATA JSON API.
+
+    ``primer.gr/mydatasearch/{uid}`` redirects to ``mydata.primer.gr/{uid}``,
+    a React SPA backed by a JSON endpoint. We extract the identifier and query
+    the backend directly.
+    """
+    identifier = qr_url.rstrip("/").rsplit("/", 1)[-1]
+    identifier = identifier.split("?")[0].split("#")[0]
+
+    logger.info("Fetching Primer record for identifier %s", identifier)
+
+    response = requests.post(
+        PRIMER_API_URL,
+        json={"identifier": identifier},
+        headers=BROWSER_HEADERS,
+        timeout=60,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"Primer HTTP {response.status_code}: "
+            f"{response.text[:500]}"
+        )
+
+    payload = response.json()
+
+    if str(payload.get("status")) != "200" or not payload.get("data"):
+        raise RuntimeError(
+            f"Primer error: {payload.get('message', 'unknown error')}"
+        )
+
+    return parse_primer_json(payload)
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -414,6 +491,9 @@ def fetch_tax_office_record(qr_url: str) -> TaxOfficeRecord:
 
     if "epsilonnet.gr" in qr_url:
         return _fetch_epsilon_record(qr_url)
+
+    if "primer.gr" in qr_url:
+        return _fetch_primer_record(qr_url)
 
     logger.info("Using third-party viewer handler: %s", qr_url)
     return _fetch_viewer_record(qr_url)

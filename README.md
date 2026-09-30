@@ -22,6 +22,7 @@ document record from AADE and compare it with the extracted fields.
   - `e-invoicing.gr` — Entersoft viewer
   - `einvoice.s1ecos.gr` — SoftOne viewer
   - `*.epsilonnet.gr` — Epsilon Net viewer (raw myDATA XML)
+  - `primer.gr` / `mydata.primer.gr` — Primer viewer (JSON API)
 - Cross-checks the extracted data against the tax office and reports
   `verified` / `mismatch` / `unavailable`.
 - Strict JSON output on stdout — safe to pipe into other tools.
