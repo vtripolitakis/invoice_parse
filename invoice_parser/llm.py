@@ -4,10 +4,12 @@ This module builds the multimodal request, enforces the response JSON schema,
 and parses the model's reply into an :class:`InvoiceDocument`.
 """
 
+import copy
 import json
 import logging
 import os
 import sys
+from typing import Any
 
 import requests
 
@@ -74,23 +76,112 @@ def build_content(image_urls: list[str]) -> list[dict]:
     return content
 
 
+def _make_strict_schema(schema: dict) -> dict:
+    """Normalise a Pydantic JSON schema for strict structured outputs.
+
+    Strict mode (OpenAI and others) requires that every object lists all of
+    its properties in ``required``, rejects ``title``/``default`` and
+    ``description``, and ``anyOf`` of ``{"type": "null"}``. It also mishandles
+    unreferenced ``$defs``. We therefore inline every ``$ref`` into a
+    self-contained schema and collapse nullable unions. This mutates a copy
+    in place.
+    """
+    schema = copy.deepcopy(schema)
+
+    # Inline $defs/$ref. This also drops unreferenced definitions such as
+    # TaxOfficeValidation, which is excluded from the request schema.
+    defs = schema.pop("$defs", {})
+
+    def inline(node: Any) -> Any:
+        if isinstance(node, list):
+            return [inline(item) for item in node]
+
+        if isinstance(node, dict):
+            if "$ref" in node:
+                name = node["$ref"].rsplit("/", 1)[-1]
+
+                if name in defs:
+                    return inline(copy.deepcopy(defs[name]))
+
+            return {key: inline(value) for key, value in node.items()}
+
+        return node
+
+    schema = inline(schema)
+
+    def fix(node: object) -> None:
+        if isinstance(node, list):
+            for item in node:
+                fix(item)
+            return
+
+        if not isinstance(node, dict):
+            return
+
+        # Collapse simple `anyOf` of {"type": X} / {"type": "null"} into a
+        # union type, e.g. {"type": ["string", "null"]}.
+        any_of = node.get("anyOf")
+        if any_of:
+            types = []
+            nullable = False
+
+            for option in any_of:
+                if isinstance(option, dict) and set(option) == {"type"}:
+                    if option["type"] == "null":
+                        nullable = True
+                    else:
+                        types.append(option["type"])
+
+            if types:
+                node["type"] = types + (["null"] if nullable else [])
+                node.pop("anyOf", None)
+
+        # Every property must be required at each object level. Recurse into
+        # the property schemas (never into the property-name mapping itself,
+        # or a field literally named "description" would be stripped).
+        if isinstance(node.get("properties"), dict):
+            node["required"] = list(node["properties"].keys())
+
+            for child in node["properties"].values():
+                fix(child)
+
+        # Recurse into any other schema-bearing children (items, ...).
+        for key, value in node.items():
+            if key != "properties":
+                fix(value)
+
+        # Unsupported annotation keys for OpenAI strict mode.
+        for key in ("title", "default", "description"):
+            node.pop(key, None)
+
+    fix(schema)
+
+    return schema
+
+
 def build_schema() -> dict:
     """Return the JSON schema to enforce, minus locally-populated fields.
 
-    ``qr_url`` and ``validation_with_tax_office`` are filled in locally (not by
-    the model), so they are removed to avoid wasting tokens or letting the
-    model hallucinate them.
+    ``qr_url``, ``validation_with_tax_office``, ``model`` and ``cost_usd`` are
+    filled in locally (not by the model), so they are removed to avoid wasting
+    tokens or letting the model hallucinate them. The result is normalised to
+    the strict structured-outputs JSON Schema subset.
     """
     schema = InvoiceDocument.model_json_schema()
 
-    for local_field in ("qr_url", "validation_with_tax_office"):
+    for local_field in (
+        "qr_url",
+        "validation_with_tax_office",
+        "model",
+        "cost_usd",
+    ):
         schema.get("properties", {}).pop(local_field, None)
 
         required = schema.get("required", [])
         if local_field in required:
             required.remove(local_field)
 
-    return schema
+    return _make_strict_schema(schema)
 
 
 def extract_message_content(data: dict) -> str:
@@ -114,24 +205,27 @@ def extract_message_content(data: dict) -> str:
     return content
 
 
-def log_cost(usage: dict | None) -> None:
-    """Print the OpenRouter cost to stderr (always, even without --verbose)."""
-    if not usage:
-        return
-
-    cost = usage.get("cost")
+def log_usage(model: str, usage: dict | None) -> None:
+    """Print the model and cost to stderr (always, even without --verbose)."""
+    cost = usage.get("cost") if usage else None
 
     if cost is not None:
         print(
-            f"OpenRouter cost: ${cost:.6f}",
+            f"Model: {model} | Cost: ${cost:.6f}",
             file=sys.stderr,
         )
+    else:
+        print(f"Model: {model}", file=sys.stderr)
 
 
-def extract_invoice_fields(image_urls: list[str]) -> InvoiceDocument:
+def extract_invoice_fields(
+    image_urls: list[str],
+    model: str | None = None,
+) -> InvoiceDocument:
     """Send the page images to the LLM and return the parsed document.
 
-    Requires the ``OPENROUTER_API_KEY`` environment variable.
+    Requires the ``OPENROUTER_API_KEY`` environment variable. ``model``
+    overrides the default :data:`MODEL`.
     """
     api_key = os.getenv("OPENROUTER_API_KEY")
 
@@ -140,8 +234,10 @@ def extract_invoice_fields(image_urls: list[str]) -> InvoiceDocument:
             "OPENROUTER_API_KEY environment variable is not set."
         )
 
+    model = model or MODEL
+
     payload = {
-        "model": MODEL,
+        "model": model,
         "temperature": 0,
         "messages": [
             {
@@ -167,7 +263,7 @@ def extract_invoice_fields(image_urls: list[str]) -> InvoiceDocument:
 
     logger.info(
         "Calling OpenRouter model %s with %d page image(s)",
-        MODEL,
+        model,
         len(image_urls),
     )
 
@@ -196,6 +292,12 @@ def extract_invoice_fields(image_urls: list[str]) -> InvoiceDocument:
         extract_message_content(data)
     )
 
-    log_cost(data.get("usage"))
+    usage = data.get("usage")
+    cost = usage.get("cost") if usage else None
+
+    invoice.model = model
+    invoice.cost_usd = cost
+
+    log_usage(model, usage)
 
     return invoice

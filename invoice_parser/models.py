@@ -98,6 +98,10 @@ class InvoiceDocument(StrictModel):
     # Cross-check against the myDATA QR endpoint, done locally.
     validation_with_tax_office: TaxOfficeValidation | None = None
 
+    # Extraction metadata, populated locally.
+    model: str | None = None
+    cost_usd: float | None = None
+
     line_items: list[LineItem]
     totals: Totals
 

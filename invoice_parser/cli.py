@@ -18,7 +18,7 @@ import logging
 import sys
 from pathlib import Path
 
-from .llm import extract_invoice_fields
+from .llm import MODEL, extract_invoice_fields
 from .models import InvoiceDocument
 from .pdf_utils import extract_qr_url, pdf_to_data_urls
 from .tax_office import validate_against_tax_office
@@ -26,7 +26,10 @@ from .tax_office import validate_against_tax_office
 logger = logging.getLogger(__name__)
 
 
-def extract_invoice(pdf_path: Path) -> InvoiceDocument:
+def extract_invoice(
+    pdf_path: Path,
+    model: str | None = None,
+) -> InvoiceDocument:
     """Extract an invoice from ``pdf_path`` and cross-check it with AADE."""
     logger.info("Parsing invoice: %s", pdf_path)
 
@@ -40,7 +43,7 @@ def extract_invoice(pdf_path: Path) -> InvoiceDocument:
 
     image_urls = pdf_to_data_urls(pdf_path)
 
-    invoice = extract_invoice_fields(image_urls)
+    invoice = extract_invoice_fields(image_urls, model=model)
 
     invoice.qr_url = qr_url
 
@@ -85,6 +88,15 @@ def main() -> None:
         help="Print detailed progress information to stderr.",
     )
 
+    parser.add_argument(
+        "--model",
+        default=MODEL,
+        help=(
+            "OpenRouter model to use "
+            f"(default: {MODEL})"
+        ),
+    )
+
     args = parser.parse_args()
 
     _configure_logging(verbose=args.verbose)
@@ -98,7 +110,7 @@ def main() -> None:
         sys.exit(2)
 
     try:
-        invoice = extract_invoice(args.file)
+        invoice = extract_invoice(args.file, model=args.model)
 
         # stdout carries only the JSON, so the CLI composes well with pipes.
         print(

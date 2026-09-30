@@ -6,11 +6,11 @@
 Extract structured data from Greek (and English) accounting documents and
 cross-check them against the Greek tax office (AADE).
 
-The tool renders a PDF invoice to images, sends them to a vision LLM (Qwen via
-[OpenRouter](https://openrouter.ai)), and decodes the **myDATA QR code**
-locally — the QR is read with a barcode decoder (free), never by the model.
-The decoded URL is then used to fetch the authoritative document record from
-AADE and compare it with the extracted fields.
+The tool renders a PDF invoice to images, sends them to a vision LLM via
+[OpenRouter](https://openrouter.ai) (default model: Qwen), and decodes the
+**myDATA QR code** locally — the QR is read with a barcode decoder (free),
+never by the model. The decoded URL is then used to fetch the authoritative
+document record from AADE and compare it with the extracted fields.
 
 ## Features
 
@@ -55,6 +55,13 @@ export OPENROUTER_API_KEY="sk-or-..."
 python -m invoice_parser --file samples/invoice.pdf
 ```
 
+Use any vision-capable OpenRouter model with `--model`
+(default: `qwen/qwen3.5-35b-a3b`):
+
+```bash
+python -m invoice_parser --file samples/invoice.pdf --model openai/gpt-4o-mini
+```
+
 For detailed progress logs (stderr):
 
 ```bash
@@ -73,6 +80,8 @@ The result is a single JSON object, for example:
 
 ```json
 {
+  "model": "openai/gpt-4o-mini",
+  "cost_usd": 0.005768,
   "document_type": "invoice",
   "invoice_number": "5793",
   "issue_date": "2026-09-10",
