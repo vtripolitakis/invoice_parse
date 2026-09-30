@@ -1,0 +1,4 @@
+private/**/*
+myenv/**/*
+*.pdf
+__pycache__/**/*
