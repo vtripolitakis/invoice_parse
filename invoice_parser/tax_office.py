@@ -29,7 +29,7 @@ from typing import Callable
 
 import requests
 
-from models import InvoiceDocument, TaxOfficeRecord, TaxOfficeValidation
+from .models import InvoiceDocument, TaxOfficeRecord, TaxOfficeValidation
 
 logger = logging.getLogger(__name__)
 

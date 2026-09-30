@@ -52,19 +52,19 @@ export OPENROUTER_API_KEY="sk-or-..."
 ## Usage
 
 ```bash
-./invoice_parse.py --file invoice.pdf
+python -m invoice_parser --file samples/invoice.pdf
 ```
 
 For detailed progress logs (stderr):
 
 ```bash
-./invoice_parse.py --file invoice.pdf --verbose
+python -m invoice_parser --file samples/invoice.pdf --verbose
 ```
 
 stdout contains only the JSON document, so it composes well:
 
 ```bash
-./invoice_parse.py --file invoice.pdf | jq .validation_with_tax_office.status
+python -m invoice_parser --file samples/invoice.pdf | jq .validation_with_tax_office.status
 ```
 
 ## Output
@@ -133,9 +133,24 @@ The result is a single JSON object, for example:
 
 ## Project layout
 
-| File               | Purpose                                                        |
+```
+invoice/
+├── invoice_parser/            # the Python package
+│   ├── __init__.py
+│   ├── __main__.py            # enables `python -m invoice_parser`
+│   ├── cli.py                 # CLI entry point and pipeline
+│   ├── llm.py                 # OpenRouter/Qwen client
+│   ├── pdf_utils.py           # PDF → images and local QR decoding
+│   ├── tax_office.py          # tax-office fetch/parse/cross-check
+│   └── models.py              # Pydantic schemas
+├── samples/                   # sample invoice PDFs
+├── requirements.txt
+└── README.md
+```
+
+| Module             | Purpose                                                        |
 | ------------------ | -------------------------------------------------------------- |
-| `invoice_parse.py` | CLI entry point and orchestration (pipeline)                   |
+| `cli.py`           | CLI entry point and orchestration (pipeline)                   |
 | `llm.py`           | OpenRouter/Qwen client: prompt, request, response parsing      |
 | `pdf_utils.py`     | PDF → images and local myDATA QR decoding                      |
 | `tax_office.py`    | Tax-office record fetching, parsing, and cross-check           |

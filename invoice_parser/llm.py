@@ -11,7 +11,7 @@ import sys
 
 import requests
 
-from models import InvoiceDocument
+from .models import InvoiceDocument
 
 logger = logging.getLogger(__name__)
 

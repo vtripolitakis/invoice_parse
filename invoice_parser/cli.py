@@ -18,10 +18,10 @@ import logging
 import sys
 from pathlib import Path
 
-from llm import extract_invoice_fields
-from models import InvoiceDocument
-from pdf_utils import extract_qr_url, pdf_to_data_urls
-from tax_office import validate_against_tax_office
+from .llm import extract_invoice_fields
+from .models import InvoiceDocument
+from .pdf_utils import extract_qr_url, pdf_to_data_urls
+from .tax_office import validate_against_tax_office
 
 logger = logging.getLogger(__name__)
 

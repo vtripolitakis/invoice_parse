@@ -1,4 +1,6 @@
 private/**/*
+samples/**/*
 myenv/**/*
 *.pdf
 __pycache__/**/*
+invoice_parser/__pycache__/**/*
